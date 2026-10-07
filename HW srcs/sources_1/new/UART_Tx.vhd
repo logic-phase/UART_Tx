@@ -44,7 +44,8 @@ Port (
 --output ports 
     Tx         :    out std_logic ;
     Data_ready :    out std_logic ; 
-    Err  :          out std_logic 
+    Err  :          out std_logic ; 
+    Last_bit :      out std_logic 
  );
 end UART_Tx;
 
@@ -53,8 +54,9 @@ architecture Behv of UART_Tx is
 type States is (IDLE , START , TRANSMIT , FINISH); 
 signal CurrentState , NextState : States ;
 --signal NextState : States ;
-signal i : integer range 0 to 7 := 0 ; 
+signal i : integer range 0 to 8 := 0 ; 
 signal shift_reg : std_logic_vector( DATA_WIDTH-1 downto 0 ) ; 
+signal Last_bit_int : std_logic ; 
 --Clk and baud rate decleration 
 constant Clk_Freq : integer := 50000000 ; 
 constant BAUD_RATE : integer := 9600 ; 
@@ -63,6 +65,8 @@ constant BAUD_DIV  : integer := Clk_Freq / BAUD_RATE;
 signal baud_counter : integer range 0 to BAUD_DIV-1 := 0;
 
 begin
+
+
 update_state : process(clk)
 begin
     if rising_edge(clk) then
@@ -74,7 +78,7 @@ begin
     end if;
 end process;
 
-Transition_state : process(Clk  , CurrentState , Data) begin 
+Transition_state : process(Clk  , NextState , Data) begin 
     case CurrentState is 
         when IDLE =>
              Data_ready <= '0' ; 
@@ -82,7 +86,9 @@ Transition_state : process(Clk  , CurrentState , Data) begin
              NextState <= START ; 
              shift_reg <= (others => '0') ; 
              Err <= '0' ;
-             Tx <= '0' ; 
+             Tx <= '0' ;
+             Last_bit_int <= '0' ;  
+             i <= 0 ; 
              shift_reg <= (others => '0') ;
         when START => 
              if (baud_counter = BAUD_DIV/2) then 
@@ -95,29 +101,43 @@ Transition_state : process(Clk  , CurrentState , Data) begin
              end if ; 
             
         when TRANSMIT =>
-            if (baud_counter = BAUD_DIV) then 
-                Tx <= shift_reg(i) ; 
-                i <= i + 1 ;
+        Data_ready <= '1' ;
+        if (shift_reg /= Data)then
+            Err <= '1' ;
+            if (Last_bit_int = '1') then
+                NextState <= IDLE ; 
+            end if ;  
+        end if ;
+            if (baud_counter = BAUD_DIV) then
+                
                 baud_counter <= 0 ;  
-                    if (i = 7) then
-                         NextState <= FINISH ; 
-                         i <= 0 ; 
+                    if (i < 8) then
+                        Tx <= shift_reg(i) ; 
+                        i <= i + 1 ;   
+                    else 
+                        NextState <= FINISH ;
+                        Last_bit_int <= '1' ;  
+                        i <= 0 ; 
                     end if ; 
                 else 
                     baud_counter <= baud_counter + 1 ; 
+                     
             end if ; 
              
         when FINISH => 
-            Data_ready <= '1' ; 
+            Last_bit_int <= '0' ; 
+            --Data_ready <= '1' ; 
             if (baud_counter = BAUD_DIV) then 
                 NextState <= IDLE ; 
                 baud_counter <= 0 ; 
             else 
                 baud_counter <= baud_counter + 1 ; 
-                Tx <= '1' ; 
+                Tx <= '1' ;   -- stop bit 
             end if ; 
                 
     end case ; 
+    
+Last_bit <= Last_bit_int ; 
 
 end process ; 
     
